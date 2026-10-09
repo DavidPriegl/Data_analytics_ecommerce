@@ -1,22 +1,44 @@
+import contextlib
+import io
+import json
 import os
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-DATA_PATH = 'data/python_data_analytics_cleaned.csv'
+BASE_DIR = Path(__file__).resolve().parent
+NOTEBOOK_PATH = BASE_DIR / 'main.ipynb'
 
 st.set_page_config(page_title='E-commerce Dashboard', layout='wide')
 
 
 @st.cache_data
 def load_data(path, mtime):
-    # mtime is part of the cache key, so re-running the notebook's to_csv refreshes the data
-    df = pd.read_csv(path, parse_dates=['OrderDate'])
-    return df
+    """Run the notebook's code cells and return the cleaned dataframe it builds.
+
+    mtime is part of the cache key, so editing the notebook refreshes the dashboard.
+    """
+    cells = json.loads(Path(path).read_text())['cells']
+    namespace = {'__name__': 'notebook'}
+    cwd = os.getcwd()
+    os.chdir(BASE_DIR)  # the notebook uses paths relative to the project folder
+    try:
+        for cell in cells:
+            if cell['cell_type'] != 'code':
+                continue
+            source = ''.join(cell['source'])
+            if '.to_csv(' in source:  # don't rewrite the cleaned CSV on every dashboard load
+                continue
+            with contextlib.redirect_stdout(io.StringIO()):
+                exec(compile(source, f"{path}:{cell.get('id', '')}", 'exec'), namespace)
+    finally:
+        os.chdir(cwd)
+    return namespace['df']
 
 
-df = load_data(DATA_PATH, os.path.getmtime(DATA_PATH))
+df = load_data(NOTEBOOK_PATH, os.path.getmtime(NOTEBOOK_PATH))
 
 st.title('E-commerce Dashboard')
 
